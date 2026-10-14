@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>埃及鱼VCF通讯录生成器</title>
+<style>
+*{box-sizing:border-box;font-family:system-ui,sans-serif;margin:0;padding:0}
+body{padding:16px;background:#f5f7fa;color:#222}
+.wrap{max-width:800px;margin:0 auto;background:#fff;padding:20px;border-radius:12px;box-shadow:0 2px 10px #00000012}
+h1{font-size:20px;margin-bottom:12px;text-align:center}
+.tip{background:#eef6ff;padding:10px;border-radius:8px;font-size:14px;margin-bottom:14px;color:#255;line-height:1.6}
+textarea{width:100%;height:180px;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px;resize:vertical;margin-bottom:12px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+button{padding:10px 16px;border:none;border-radius:8px;font-size:15px;cursor:pointer;background:#2563eb;color:white}
+button#clear{background:#6b7280}
+button#download{background:#059669}
+button#fileBtn{background:#9333ea;}
+#preview{width:100%;height:220px;padding:12px;border:1px solid #ddd;border-radius:8px;font-family:monospace;font-size:14px;white-space:pre;overflow:auto;background:#fafafa}
+#fileInput{display:none;}
+.dl-tip{font-size:12px;color:#888;margin-top:8px;line-height:1.5}
+</style>
+<!-- 引入SheetJS 读取xlsx（Excel/WPS表格） -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1>埃及鱼VCF通讯录生成器</h1>
+<div class="tip">
+✅支持多种格式（空格、逗号、顿号等任意标点分隔）<br>
+支持：姓名+号码 ｜号码+姓名 ｜仅号码<br>
+✅新增：支持导入Excel/WPS的.xlsx表格，读取A列内容<br>
+示例：<br>
+张三 13800138000<br>
+13900139000，李四<br>
+王五，13700137000<br>
+13600136000<br>
+仅号码自动命名：1、2、3……依次排序
+</div>
+<textarea id="inputArea" placeholder="没有本人授权允许任何人不得擅用此工具"></textarea>
+<div class="btns">
+<button id="genBtn">生成VCF预览</button>
+<button id="clear">清空</button>
+<button id="download">下载 vcf 文件</button>
+<button id="fileBtn">📂 导入表格</button>
+<input type="file" id="fileInput" accept=".xlsx">
+</div>
+<pre id="preview"></pre>
+<div class="dl-tip">
+💡 下载后如找不到文件：<br>
+• 安卓手机：一般在「文件管理 → Download / 下载」文件夹里<br>
+• iPhone：点右上角「⋯」或分享按钮，选择「存储到文件」即可保存到任意位置<br>
+• 如果浏览器拦截了下载，长按下方预览内容 → 另存为
+</div>
+</div>
+
+<script>
+const inputArea = document.getElementById('inputArea');
+const preview = document.getElementById('preview');
+const genBtn = document.getElementById('genBtn');
+const clearBtn = document.getElementById('clear');
+const downloadBtn = document.getElementById('download');
+const fileInput = document.getElementById('fileInput');
+const fileBtn = document.getElementById('fileBtn');
+let vcfText = "";
+
+// 文件按钮点击，触发隐藏文件选择框
+fileBtn.onclick = function(){
+    fileInput.click();
+}
+
+// ==========【Excel/WPS读取逻辑】==========
+fileInput.onchange = function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e){
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data,{type:'array'});
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet,{header:1});
+        let textLines = [];
+        for(let row of jsonData){
+            if(row[0] !== undefined && row[0] !== null){
+                textLines.push(row[0].toString().trim());
+            }
+        }
+        inputArea.value = textLines.join("\n");
+    }
+    reader.readAsArrayBuffer(file);
+}
+
+genBtn.onclick = function(){
+    const lines = inputArea.value.split('\n');
+    vcfText = "";
+    let emptyNameCount = 0;
+    for(let line of lines){
+        line = line.trim();
+        if(!line) continue;
+
+        let cleanLine = line.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, ' ');
+        cleanLine = cleanLine.replace(/\s+/g, ' ').trim();
+        const parts = cleanLine.split(' ');
+
+        let name = "";
+        let phone = "";
+        const numList = [];
+        const textList = [];
+
+        for(let p of parts){
+            if(/^\d+$/.test(p)){
+                numList.push(p);
+            }else{
+                textList.push(p);
+            }
+        }
+
+        for(let num of numList){
+            if(num.length === 11){
+                phone = num;
+                break;
+            }
+        }
+        name = textList.join('');
+
+        if(!name && phone){
+            emptyNameCount++;
+            name = String(emptyNameCount);
+        }
+        if(!phone){
+            continue;
+        }
+
+        let family, given;
+        if(name.length <= 1){
+            family = name;
+            given = "";
+        }else{
+            family = name[0];
+            given = name.slice(1);
+        }
+
+        vcfText += `BEGIN:VCARD
+VERSION:3.0
+N:${family};${given};;;
+FN:${name}
+TEL;CELL:${phone}
+END:VCARD
+`;
+    }
+    preview.textContent = vcfText;
+};
+
+clearBtn.onclick = function(){
+    inputArea.value = "";
+    preview.textContent = "";
+    vcfText = "";
+};
+
+// ==========【修复后的下载逻辑：全浏览器兼容】==========
+downloadBtn.onclick = function(){
+    if(!vcfText){
+        alert("请先生成VCF内容！");
+        return;
+    }
+
+    const fileName = "contacts.vcf";
+    // MIME 用 application/octet-stream：强制浏览器下载，不尝试打开（解决国产浏览器拦截下载的问题）
+    // 不加 BOM 头：避免手机通讯录解析失败
+    const blob = new Blob([vcfText], {type: "application/octet-stream"});
+
+    // 方案A: 现代浏览器标准方式（a 标签 download 属性）
+    if (typeof URL !== 'undefined' && URL.createObjectURL) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // 延迟 1 秒再回收 URL，解决国产浏览器下载一半 URL 被回收导致失败
+        setTimeout(function() {
+            URL.revokeObjectURL(url);
+        }, 1000);
+        return;
+    }
+
+    // 方案B: 旧版 IE / Edge 兼容
+    if (window.navigator && window.navigator.msSaveBlob) {
+        window.navigator.msSaveBlob(blob, fileName);
+        return;
+    }
+
+    // 方案C: 最终兜底 —— 转成 Data URI 在新窗口打开，用户手动右键/长按保存
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const dataUri = e.target.result;
+        const win = window.open(dataUri, '_blank');
+        if (!win) {
+            alert('浏览器拦截了弹出窗口，请长按预览内容选择"另存为"保存文件');
+        }
+    };
+    reader.readAsDataURL(blob);
+};
+</script>
+</body>
+</html>
